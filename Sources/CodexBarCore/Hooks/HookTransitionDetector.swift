@@ -317,16 +317,26 @@ public final class HookTransitionDetector {
         }
     }
 
+    /// Clock skew allowed between the provider's reset boundary and this machine
+    /// when deciding whether that boundary has been reached.
+    static let resetBoundarySkew: TimeInterval = 60
+
     private func resetEvent(_ transition: LaneTransition) -> HookEvent? {
         let previousReset = transition.previous.resetsAt
         let currentReset = transition.rateWindow.resetsAt
-        let boundaryMoved: Bool = if let previousReset, let currentReset {
+        // A later boundary only means a new window once the previous one has
+        // actually been reached. Idle windows report a boundary that slides with
+        // the clock ("resets in 5h" on every poll) and some providers jitter it by
+        // seconds between polls; both move it forward while the old boundary is
+        // still in the future, and must not read as resets.
+        let boundaryPassed: Bool = if let previousReset, let currentReset {
             currentReset > previousReset
+                && transition.now >= previousReset.addingTimeInterval(-Self.resetBoundarySkew)
         } else {
             false
         }
         let usageDropped = transition.previous.usage - transition.current >= self.resetDropThreshold
-        guard boundaryMoved || usageDropped else { return nil }
+        guard boundaryPassed || usageDropped else { return nil }
 
         return transition.event(.quotaReset)
     }
